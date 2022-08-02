@@ -22,9 +22,7 @@ class TestCase:
     def create_test_case(cls, path):
         with open(path, "rb") as f:
             prefix = f.read(len(TestCase.PREFIX))
-            if prefix != TestCase.PREFIX:
-                return None
-            return cls(path)
+            return None if prefix != TestCase.PREFIX else cls(path)
 
     def metadata(self):
         with open(self.path) as poc_file:
@@ -39,7 +37,7 @@ class TestCase:
             return tomlkit.loads(toml_str)
 
     def __repr__(self):
-        return "TestCase(%s)" % self.path
+        return f"TestCase({self.path})"
 
 
 class TestResult:
@@ -55,17 +53,17 @@ class TestResult:
         return self.failure is None
 
     def __str__(self):
-        if self.is_success():
-            if self.test_type == "normal":
-                return "\u001b[32;1mSUCCESS       \u001b[0m  {}".format(self.test_case.path)
-            elif self.test_type == "fp":
-                return "\u001b[33;1mFALSE-POSITIVE\u001b[0m  {}".format(self.test_case.path)
-            elif self.test_type == "fn":
-                return "\u001b[33;1mFALSE-NEGATIVE\u001b[0m  {}".format(self.test_case.path)
-            else:
-                raise Exception("Unknown test_type {}".format(self.test_type))
+        if not self.is_success():
+            return f"\u001b[31;1mFAIL          \u001b[0m  {self.test_case.path}\n{self.failure}"
+
+        if self.test_type == "normal":
+            return f"\u001b[32;1mSUCCESS       \u001b[0m  {self.test_case.path}"
+        elif self.test_type == "fp":
+            return f"\u001b[33;1mFALSE-POSITIVE\u001b[0m  {self.test_case.path}"
+        elif self.test_type == "fn":
+            return f"\u001b[33;1mFALSE-NEGATIVE\u001b[0m  {self.test_case.path}"
         else:
-            return "\u001b[31;1mFAIL          \u001b[0m  {}\n{}".format(self.test_case.path, self.failure)
+            raise Exception(f"Unknown test_type {self.test_type}")
 
 
 def extract_analyzer_name(report):
@@ -104,13 +102,12 @@ def run_test(test_case):
             else:
                 reported_analyzers = set()
 
-            analyzer_mismatch_msg = "Analyzer set mismatch; expected {}, reported {}".format(
-                list(expected_analyzers), list(reported_analyzers)
-            )
+            analyzer_mismatch_msg = f"Analyzer set mismatch; expected {list(expected_analyzers)}, reported {list(reported_analyzers)}"
+
             assert expected_analyzers == reported_analyzers, analyzer_mismatch_msg
 
             return TestResult(test_case, test_type)
-    except (AssertionError,) as e:
+    except AssertionError as e:
         return TestResult(test_case, test_type, e)
 
 
@@ -129,7 +126,7 @@ def handle_result(test_result):
     total_cnt[test_result.test_type] += 1
     if test_result.is_success():
         success_cnt[test_result.test_type] += 1
-    print(str(test_result))
+    print(test_result)
 
 
 files = [os.path.join(dp, f) for dp, dn, fn in os.walk("tests") for f in fn]
@@ -141,16 +138,17 @@ test_cases = filter(
 
 if __name__ == "__main__":
     with ThreadPool(16) as pool:
-        results = []
-        for test_case in test_cases:
-            results.append(pool.apply_async(run_test, (test_case,), callback=handle_result))
-        
+        results = [
+            pool.apply_async(run_test, (test_case,), callback=handle_result)
+            for test_case in test_cases
+        ]
+
         for result in results:
             result.get()
 
-    print("False-negatives: {}/{}".format(success_cnt["fn"], total_cnt["fn"]))
-    print("False-positives: {}/{}".format(success_cnt["fp"], total_cnt["fp"]))
-    print("Normal: {}/{}".format(success_cnt["normal"], total_cnt["normal"]))
+    print(f'False-negatives: {success_cnt["fn"]}/{total_cnt["fn"]}')
+    print(f'False-positives: {success_cnt["fp"]}/{total_cnt["fp"]}')
+    print(f'Normal: {success_cnt["normal"]}/{total_cnt["normal"]}')
 
     if success_cnt["fp"] == total_cnt["fp"] and success_cnt["normal"] == total_cnt["normal"]:
         sys.exit(0)
